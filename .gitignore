@@ -1,0 +1,16 @@
+# Ambiente virtual
+venv/
+
+# Arquivos de cache Python
+__pycache__/
+*.pyc
+
+# Arquivos de ambiente e credenciais
+.env
+
+# Configurações locais da AWS
+.aws/
+
+# Arquivos do sistema
+.DS_Store
+Thumbs.db
