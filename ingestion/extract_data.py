@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 
+import boto3
 import pandas as pd
 import yfinance as yf
 
@@ -9,7 +10,8 @@ import yfinance as yf
 # CONFIGURAÇÕES
 # ==========================================
 
-# Lista de ativos que serão monitorados
+BUCKET_NAME = "aws-compliance-risk-pipeline"
+
 TICKERS = [
     "PETR4.SA",
     "VALE3.SA",
@@ -23,7 +25,7 @@ TICKERS = [
 
 
 # ==========================================
-# FUNÇÃO DE EXTRAÇÃO
+# EXTRAÇÃO DE DADOS
 # ==========================================
 
 def extract_market_data(ticker):
@@ -35,21 +37,18 @@ def extract_market_data(ticker):
     try:
         print(f"Coletando dados de {ticker}...")
 
-        # Cria o objeto do ativo
         asset = yf.Ticker(ticker)
 
-        # Busca dados históricos
         data = asset.history(
             period="6mo",
             interval="1d"
         )
 
-        # Verifica se existem dados
         if data.empty:
             print(f"Nenhum dado encontrado para {ticker}")
             return None
 
-        # Transforma o índice de data em coluna
+        # Transforma a data do índice em coluna
         data = data.reset_index()
 
         # Adiciona o ticker
@@ -87,16 +86,52 @@ def extract_market_data(ticker):
 
 
 # ==========================================
+# UPLOAD PARA AMAZON S3
+# ==========================================
+
+def upload_to_s3(local_file_path, s3_key):
+    """
+    Faz upload de um arquivo local para o Amazon S3.
+    """
+
+    try:
+
+        print("\nIniciando upload para o Amazon S3...")
+
+        # Cria o cliente S3
+        s3_client = boto3.client("s3")
+
+        # Faz upload do arquivo
+        s3_client.upload_file(
+            local_file_path,
+            BUCKET_NAME,
+            s3_key
+        )
+
+        print("Upload realizado com sucesso!")
+
+        print(
+            f"s3://{BUCKET_NAME}/{s3_key}"
+        )
+
+    except Exception as error:
+
+        print(
+            f"Erro ao fazer upload para o S3: {error}"
+        )
+
+
+# ==========================================
 # FUNÇÃO PRINCIPAL
 # ==========================================
 
 def main():
 
     print("=" * 50)
-    print("INICIANDO COLETA DE DADOS FINANCEIROS")
+    print("INICIANDO PIPELINE DE INGESTÃO")
     print("=" * 50)
 
-    # Lista para armazenar os dados coletados
+    # Lista para armazenar os dados
     all_data = []
 
     # Percorre todos os ativos
@@ -104,17 +139,16 @@ def main():
 
         data = extract_market_data(ticker)
 
-        # Adiciona apenas dados válidos
         if data is not None:
             all_data.append(data)
 
-    # Verifica se algum dado foi coletado
+    # Verifica se dados foram coletados
     if not all_data:
 
         print("\nNenhum dado foi coletado.")
         return
 
-    # Une os dados de todos os ativos
+    # Une todos os dados
     final_data = pd.concat(
         all_data,
         ignore_index=True
@@ -131,7 +165,7 @@ def main():
     day = execution_date.strftime("%d")
 
     # ==========================================
-    # CAMADA RAW PARTICIONADA
+    # CAMINHO LOCAL - RAW
     # ==========================================
 
     raw_path = (
@@ -141,21 +175,42 @@ def main():
         f"day={day}"
     )
 
-    # Cria os diretórios caso não existam
+    # Cria os diretórios locais
     os.makedirs(
         raw_path,
         exist_ok=True
     )
 
-    # Caminho final do arquivo
+    # Arquivo local
     output_path = (
         f"{raw_path}/market_data.csv"
     )
 
-    # Salva os dados no formato CSV
+    # Salva os dados
     final_data.to_csv(
         output_path,
         index=False
+    )
+
+    # ==========================================
+    # CAMINHO NO S3
+    # ==========================================
+
+    s3_key = (
+        f"raw/market_data/"
+        f"year={year}/"
+        f"month={month}/"
+        f"day={day}/"
+        f"market_data.csv"
+    )
+
+    # ==========================================
+    # UPLOAD PARA S3
+    # ==========================================
+
+    upload_to_s3(
+        output_path,
+        s3_key
     )
 
     # ==========================================
@@ -163,13 +218,20 @@ def main():
     # ==========================================
 
     print("\n" + "=" * 50)
-    print("COLETA FINALIZADA COM SUCESSO!")
+    print("PIPELINE FINALIZADO")
     print("=" * 50)
 
-    print(f"\nTotal de registros coletados: {len(final_data)}")
+    print(
+        f"\nTotal de registros coletados: {len(final_data)}"
+    )
 
     print(
-        f"\nArquivo salvo em:\n{output_path}"
+        f"\nArquivo local:\n{output_path}"
+    )
+
+    print(
+        f"\nArquivo no S3:\n"
+        f"s3://{BUCKET_NAME}/{s3_key}"
     )
 
     print("\nPrévia dos dados:")
